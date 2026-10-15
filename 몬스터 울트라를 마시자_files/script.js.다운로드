@@ -1,0 +1,163 @@
+'use strict';
+
+const dialog = document.querySelector('#ingredient-dialog');
+const info = document.querySelector('#dialog-info');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let lastTrigger;
+let canAnimation;
+let ghost;
+let previousOverflow;
+
+// Static content keeps the page fully usable without a server or API.
+info.innerHTML = `
+  <p class="eyebrow">궁금해서 눌러보셨네요</p>
+  <h2 id="dialog-title">뭐 들었나 볼까요?</h2>
+  <div class="dialog-tabs" role="tablist" aria-label="제품 정보">
+    <button id="nutrition-tab" role="tab" aria-selected="true" aria-controls="nutrition-panel" data-tab="nutrition-panel">영양정보</button>
+    <button id="ingredients-tab" role="tab" aria-selected="false" aria-controls="ingredients-panel" tabindex="-1" data-tab="ingredients-panel">주요 원재료</button>
+  </div>
+  <section id="nutrition-panel" role="tabpanel" aria-labelledby="nutrition-tab" tabindex="0">
+    <div class="nutrition-highlights"><div><strong>0<small>g</small></strong><span>당류</span></div><div><strong>14<small>kcal</small></strong><span>열량</span></div><div><strong>100<small>mg</small></strong><span>카페인*</span></div></div>
+    <table class="nutrition-table" aria-label="355mL 한 캔 영양성분"><tbody>
+      <tr><th scope="row">나트륨</th><td>275mg</td></tr><tr><th scope="row">탄수화물</th><td>4g</td></tr>
+      <tr><th scope="row">지방 / 단백질</th><td>0.4g / 1g</td></tr><tr><th scope="row">나이아신 · 비타민 B3</th><td>30mgNE</td></tr>
+      <tr><th scope="row">판토텐산 · 비타민 B5</th><td>15mg</td></tr><tr><th scope="row">비타민 B6 / B12</th><td>3mg / 9μg</td></tr>
+      <tr><th scope="row">에리스리톨</th><td>2g</td></tr>
+    </tbody></table>
+    <p class="panel-note">*카페인 수치는 몬스터 한국 공식 페이지 표기입니다. 판매 국가·제품에 따라 표시가 달라질 수 있으므로 실제 캔의 라벨을 확인하세요.</p>
+  </section>
+  <section id="ingredients-panel" role="tabpanel" aria-labelledby="ingredients-tab" tabindex="0" hidden>
+    <ul class="ingredients-list">
+      <li><strong>시원한 탄산 베이스</strong><p>정제수, 구연산, 이산화탄소</p></li>
+      <li><strong>설탕 없이 더한 단맛</strong><p>에리스리톨, 수크랄로스, 아세설팜칼륨</p></li>
+      <li><strong>몬스터 울트라 블렌드</strong><p>타우린, 비타민 B군, 과라나 추출분말, 이노시톨</p></li>
+      <li><strong>그 밖의 주요 원재료</strong><p>인삼 추출물, L-카르니틴, 녹차 추출물, 카페인, 트로피칼·시트러스 향료</p></li>
+    </ul><p class="panel-note">주요 원재료를 요약한 정보입니다. 전체 원재료 및 함량은 제품 라벨에서 확인하세요.</p>
+  </section>
+  <p class="caffeine-note">고카페인 함유. 어린이, 임산부 및 카페인에 민감한 분은 섭취에 주의하세요.</p>
+  <a class="panel-source" href="https://www.costco.co.kr/Foods/Beverages/SoftConcentrated-Drinks/Monster-Energy-Ultra-355ml-x-24can/p/674480" target="_blank" rel="noopener noreferrer">국내 제품 영양정보 출처 ↗</a>
+`;
+
+const tabs = [...dialog.querySelectorAll('[role="tab"]')];
+function selectTab(tab, focus = false) {
+  tabs.forEach(item => {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    document.getElementById(item.dataset.tab).hidden = !selected;
+  });
+  if (focus) tab.focus();
+}
+tabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => selectTab(tab));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabs.length - 1;
+    if (next !== undefined) { event.preventDefault(); selectTab(tabs[next], true); }
+  });
+});
+
+function clearAnimation() {
+  canAnimation?.cancel();
+  ghost?.remove();
+  ghost = null;
+  document.querySelector('#expanded-can').style.visibility = '';
+}
+function openIngredients(trigger) {
+  if (dialog.open) return;
+  lastTrigger = trigger;
+  selectTab(tabs[0]);
+  previousOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  dialog.showModal();
+  dialog.classList.add('dialog-enter');
+  // The clicked product visually grows into the larger ingredient view.
+  if (trigger.classList.contains('can-button') && !reducedMotion.matches) {
+    const original = trigger.querySelector('img');
+    const target = document.querySelector('#expanded-can');
+    const start = original.getBoundingClientRect();
+    const end = target.getBoundingClientRect();
+    target.style.visibility = 'hidden';
+    ghost = original.cloneNode();
+    ghost.alt = '';
+    ghost.setAttribute('aria-hidden', 'true');
+    Object.assign(ghost.style, { position: 'fixed', left: `${end.left}px`, top: `${end.top}px`, width: `${end.width}px`, height: `${end.height}px`, zIndex: '20', objectFit: 'contain', pointerEvents: 'none', transformOrigin: 'top left' });
+    ghost.className = '';
+    dialog.append(ghost);
+    canAnimation = ghost.animate([
+      { transform: `translate(${start.left - end.left}px, ${start.top - end.top}px) scale(${start.width / end.width}, ${start.height / end.height})`, opacity: 0.8 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1 }
+    ], { duration: 550, easing: 'cubic-bezier(.16,1,.3,1)' });
+    canAnimation.onfinish = clearAnimation;
+  }
+}
+document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => openIngredients(button)));
+dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.close());
+dialog.addEventListener('click', event => {
+  const bounds = dialog.getBoundingClientRect();
+  if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
+});
+dialog.addEventListener('close', () => {
+  clearAnimation();
+  document.body.style.overflow = previousOverflow || '';
+  dialog.classList.remove('dialog-enter');
+  lastTrigger?.focus({ preventScroll: true });
+});
+
+const responseDialog = document.querySelector('#response-dialog');
+const responseContent = document.querySelector('#response-content');
+const accountNumber = '1001-3101-1487';
+let responseTrigger;
+let responseOverflow;
+
+function showResponse(accepted, trigger) {
+  responseTrigger = trigger;
+  responseContent.replaceChildren();
+  responseDialog.classList.toggle('image-response', !accepted);
+  if (accepted) {
+    const heading = document.createElement('h2');
+    heading.textContent = '제것도 ㅎㅎ;;';
+    const number = document.createElement('p');
+    number.className = 'account-number';
+    number.textContent = accountNumber;
+    const copy = document.createElement('button');
+    copy.className = 'btn btn-white';
+    copy.textContent = '계좌번호 복사';
+    const status = document.createElement('p');
+    status.className = 'copy-status';
+    status.setAttribute('role', 'status');
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(accountNumber);
+        status.textContent = '복사했어요.';
+      } catch {
+        status.textContent = '번호를 길게 눌러 복사하세요.';
+      }
+    });
+    responseContent.append(heading, number, copy, status);
+  } else {
+    const image = document.createElement('img');
+    image.src = 'assets/decline-response.jpg';
+    image.alt = '거절 버튼을 누르면 나타나는 고릴라 사진';
+    image.width = 486;
+    image.height = 630;
+    responseContent.append(image);
+  }
+  responseOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  responseDialog.showModal();
+}
+document.querySelector('#accept-choice').addEventListener('click', event => showResponse(true, event.currentTarget));
+document.querySelector('#decline-choice').addEventListener('click', event => showResponse(false, event.currentTarget));
+responseDialog.querySelector('.response-close').addEventListener('click', () => responseDialog.close());
+responseDialog.addEventListener('click', event => {
+  const bounds = responseDialog.getBoundingClientRect();
+  if (event.target === responseDialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) responseDialog.close();
+});
+responseDialog.addEventListener('close', () => {
+  document.body.style.overflow = responseOverflow || '';
+  responseTrigger?.focus({preventScroll: true});
+});
